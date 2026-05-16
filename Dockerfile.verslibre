@@ -11,7 +11,7 @@ RUN apt-get -y install git-core
 RUN apt-get install -y liblzma-dev
 
 RUN pip install --upgrade pip setuptools
-RUN pip install torch tensorflow transformers pyconll ufal.udpipe stanza fasttext nltk sentencepiece coloredlogs python-telegram-bot jellyfish hyperopt jsonpickle
+RUN pip install torch tensorflow transformers pyconll ufal.udpipe stanza fasttext nltk sentencepiece coloredlogs python-telegram-bot jellyfish hyperopt jsonpickle gradio
 
 
 WORKDIR /home
@@ -75,6 +75,7 @@ COPY ./tmp/stress_model/nn_stress.model/*.pb ./
 
 WORKDIR /text_generator/scripts/
 COPY ./scripts/verslibre_tg.sh ./
+COPY ./scripts/verslibre_web.sh ./
 
 
 WORKDIR /text_generator/models/stressed_long_poetry_generator_medium

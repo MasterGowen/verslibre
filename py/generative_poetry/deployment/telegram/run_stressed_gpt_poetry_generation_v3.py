@@ -27,7 +27,6 @@ End-2-end генерация рифмованного четверостишья
 import collections
 import datetime
 import os
-import io
 import logging
 import argparse
 import traceback
@@ -360,7 +359,9 @@ def tokenize(s):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Verslibre & haiku generator v.18')
     parser.add_argument('--token', type=str, default='', help='Telegram token')
-    parser.add_argument('--mode', type=str, default='console', choices='console telegram'.split(), help='Frontend selector')
+    parser.add_argument('--mode', type=str, default='console', choices='console telegram web'.split(), help='Frontend selector')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='Host for web frontend')
+    parser.add_argument('--port', type=int, default=7860, help='Port for web frontend')
     parser.add_argument('--poetry_model', type=str, default='../../tmp/verses_generator_medium.chitalnya', help='Poetry generative model name path')
     parser.add_argument('--tmp_dir', default='../../tmp', type=str)
     parser.add_argument('--data_dir', default='../../data', type=str)
@@ -430,6 +431,86 @@ if __name__ == '__main__':
         logging.info('Start polling messages for bot %s', tg_bot.name)
         updater.start_polling()
         updater.idle()
+    elif args.mode == 'web':
+        import gradio as gr
+
+        logging.info('Starting web UI on %s:%d', args.host, args.port)
+
+        web_sessions = collections.defaultdict(dict)
+
+        def web_generate(seed, session_id):
+            user_id = str(session_id or 'web_guest')
+            register_visitor(user_id)
+            date2prompts[datetime.date.today()] += 1
+
+            temperature_local = 0.9
+            max_temperature = 1.6
+            poems2 = []
+
+            while temperature_local <= max_temperature:
+                ranked_poems = long_poetry_generator.generate_poems(topic=seed, temperature=temperature_local, top_p=top_p,
+                                                                    top_k=top_k, typical_p=typical_p, num_return_sequences=10)
+                ranked_poems = sorted(ranked_poems, key=lambda z: -z[1])[:10]
+                poems2 = [('\n'.join(lines), score) for lines, score in ranked_poems]
+                if poems2:
+                    break
+                temperature_local *= 1.1
+
+            if not poems2:
+                date2errors[datetime.date.today()] += 1
+                web_sessions[user_id]['current'] = None
+                web_sessions[user_id]['rest'] = []
+                return 'Что-то не получается сочинить 😞\nЗадайте другую тему, пожалуйста'
+
+            web_sessions[user_id]['current'] = poems2[0][0]
+            web_sessions[user_id]['rest'] = [p for p, _ in poems2[1:]]
+            return web_sessions[user_id]['current']
+
+        def web_more(session_id):
+            user_id = str(session_id or 'web_guest')
+            rest = web_sessions[user_id].get('rest', [])
+            if not rest:
+                return 'Больше готовых вариантов пока нет. Сгенерируйте стих по новой теме.'
+            poem = rest.pop(0)
+            web_sessions[user_id]['current'] = poem
+            web_sessions[user_id]['rest'] = rest
+            return poem
+
+        def web_like(session_id):
+            user_id = str(session_id or 'web_guest')
+            poem = web_sessions[user_id].get('current')
+            if poem:
+                date2likes[datetime.date.today()] += 1
+                return 'Спасибо :)'
+            return 'Сначала сгенерируйте стих.'
+
+        def web_dislike(session_id):
+            user_id = str(session_id or 'web_guest')
+            poem = web_sessions[user_id].get('current')
+            if poem:
+                date2dislikes[datetime.date.today()] += 1
+                return 'Понятно. Жаль :('
+            return 'Сначала сгенерируйте стих.'
+
+        with gr.Blocks(title='VersLibre Poetry Generator') as demo:
+            gr.Markdown('## VersLibre: генератор стихов\nВведите тему и получите стихотворение.')
+            session_id = gr.Textbox(label='Session id (опционально)', value='web_guest')
+            seed = gr.Textbox(label='Тема')
+            output = gr.Textbox(label='Стих', lines=12)
+            status = gr.Textbox(label='Статус')
+
+            with gr.Row():
+                generate_btn = gr.Button('Сгенерировать')
+                more_btn = gr.Button('Ещё')
+                like_btn = gr.Button('Нравится!')
+                dislike_btn = gr.Button('Плохо :(')
+
+            generate_btn.click(web_generate, inputs=[seed, session_id], outputs=[output])
+            more_btn.click(web_more, inputs=[session_id], outputs=[output])
+            like_btn.click(web_like, inputs=[session_id], outputs=[status])
+            dislike_btn.click(web_dislike, inputs=[session_id], outputs=[status])
+
+        demo.launch(server_name=args.host, server_port=args.port)
     else:
         print('Вводите затравку для генерации\n')
 
